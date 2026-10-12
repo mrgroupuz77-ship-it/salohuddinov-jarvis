@@ -1,0 +1,8 @@
+# Domenni o‘zingiznikiga almashtiring. Caddy HTTPS sertifikatini o‘zi oladi.
+jarvis.sizningdomen.uz {
+    # Telegram webhook va health
+    reverse_proxy /eve/* 127.0.0.1:3000
+    # eve workflow callback’lari (yo‘lni o‘zgartirmasdan uzatiladi)
+    reverse_proxy /.well-known/workflow/* 127.0.0.1:3000
+    respond 404
+}

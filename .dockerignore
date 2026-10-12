@@ -1,0 +1,10 @@
+node_modules
+.output
+.eve
+.vercel
+.git
+data
+.env
+.env.*
+!.env.example
+*.log

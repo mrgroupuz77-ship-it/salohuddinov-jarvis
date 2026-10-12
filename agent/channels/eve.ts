@@ -1,15 +1,17 @@
 import { eveChannel } from "eve/channels/eve";
-import { localDev, placeholderAuth, vercelOidc } from "eve/channels/auth";
+import { httpBasic, localDev, placeholderAuth, vercelOidc } from "eve/channels/auth";
+
+// The eve HTTP API is an operator surface (dev TUI, health). It is NOT how
+// Muhammadjon talks to Jarvis — that is Telegram. Tools additionally refuse
+// every principal except the owner (see agent/lib/auth.ts).
+const adminUser = process.env.EVE_ADMIN_USER?.trim();
+const adminPassword = process.env.EVE_ADMIN_PASSWORD?.trim();
 
 export default eveChannel({
   auth: [
-    // Lets the eve TUI and your Vercel deployments reach the deployed agent.
     vercelOidc(),
-    // Open on localhost for `eve dev` and the REPL; ignored in production.
+    ...(adminUser && adminPassword ? [httpBasic({ username: adminUser, password: adminPassword }, { realm: "jarvis" })] : []),
     localDev(),
-    // This placeholder will not allow browser requests in production.
-    // Replace it with your app's auth provider, like Auth.js or Clerk,
-    // or use none() for a public demo.
     placeholderAuth(),
   ],
 });
