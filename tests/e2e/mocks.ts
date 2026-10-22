@@ -1,5 +1,6 @@
-// Local stand-ins for the Telegram Bot API and the Anthropic Messages API so
-// the real eve server can be exercised end to end without network or keys.
+// Local stand-ins for the Telegram Bot API, the Anthropic Messages API and the
+// Gemini API so the real eve server can be exercised end to end without
+// network or keys.
 
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
@@ -40,7 +41,7 @@ export async function startTelegramMock() {
   return { port, calls, close: () => new Promise<void>((r) => server.close(() => r())), sent: () => calls.filter((c) => c.path === "sendMessage") };
 }
 
-type Script = (request: Record<string, unknown>) => { kind: "text"; text: string } | { kind: "tool"; name: string; input: Record<string, unknown> };
+export type Script = (request: Record<string, unknown>) => { kind: "text"; text: string } | { kind: "tool"; name: string; input: Record<string, unknown> };
 
 function sse(res: ServerResponse, events: Array<[string, unknown]>) {
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
@@ -72,6 +73,44 @@ export async function startAnthropicMock(script: Script) {
       const content = step.kind === "text" ? [{ type: "text", text: step.text }] : [{ type: "tool_use", id: `toolu_${requests.length}`, name: step.name, input: step.input }];
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ ...message, content, stop_reason: stop, usage: { input_tokens: 100, output_tokens: 20 } }));
+    }
+  });
+  const port = await listen(server);
+  return { port, requests, close: () => new Promise<void>((r) => server.close(() => r())) };
+}
+
+/**
+ * Gemini API mock (`models/{id}:streamGenerateContent?alt=sse` and
+ * `:generateContent`). Each recorded request gets `model` (from the URL),
+ * `toolNames` and `lastJson` so the runner can treat providers alike.
+ * Function calls carry a thought signature so the runner can check it comes back.
+ */
+export const GEMINI_SIGNATURE = "e2e-thought-signature";
+
+export async function startGeminiMock(script: (lastJson: string) => ReturnType<Script>) {
+  const requests: Array<Record<string, unknown>> = [];
+  const server = createServer(async (req, res) => {
+    const raw = await readBody(req);
+    const body = JSON.parse(raw || "{}") as Record<string, unknown>;
+    const model = /models\/([^:/]+):/.exec(req.url ?? "")?.[1] ?? "";
+    const contents = (body.contents ?? []) as Array<{ role: string; parts: unknown[] }>;
+    const lastJson = JSON.stringify(contents[contents.length - 1]?.parts ?? []);
+    const toolNames = ((body.tools ?? []) as Array<{ functionDeclarations?: Array<{ name: string }> }>).flatMap((t) => (t.functionDeclarations ?? []).map((f) => f.name));
+    requests.push({ ...body, model, toolNames, lastJson, apiKeyHeader: Boolean(req.headers["x-goog-api-key"]) });
+    const step = script(lastJson);
+    const part = step.kind === "text" ? { text: step.text } : { functionCall: { name: step.name, args: step.input }, thoughtSignature: GEMINI_SIGNATURE };
+    const chunk = {
+      candidates: [{ content: { role: "model", parts: [part] }, finishReason: "STOP", index: 0 }],
+      usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, totalTokenCount: 120 },
+      modelVersion: model,
+    };
+    if ((req.url ?? "").includes(":streamGenerateContent")) {
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      res.end();
+    } else {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(chunk));
     }
   });
   const port = await listen(server);

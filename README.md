@@ -1,7 +1,7 @@
 # Salohuddinov Jarvis
 
 Muhammadjon Salohuddinov uchun Telegram orqali ishlaydigan shaxsiy ish yordamchisi.
-Asos: [eve](https://github.com/vercel/eve) agent runtime (TypeScript) + Claude.
+Asos: [eve](https://github.com/vercel/eve) agent runtime (TypeScript). Model — Gemini (bepul tarif) yoki Claude, `MODEL_ID` bilan almashtiriladi.
 
 **Hozirgi bosqich: 1–2.** Telegramda matnli suhbat, faqat ega boshqaradi, vazifa/loyiha/mijoz bazasi, tasdiq tugmalari, kunlik/haftalik/oylik hisobot jadvali. Nima ishlashi va nima ulanish kutayotgani — [CONNECTION_STATUS.md](CONNECTION_STATUS.md).
 
@@ -32,15 +32,15 @@ Misollar:
 
 ## Ishga tushirish
 
-To‘liq yo‘riqnoma: [DEPLOYMENT.md](DEPLOYMENT.md). Asosiy yo‘l — **GitHub + Railway**, domen kerak emas:
+To‘liq yo‘riqnoma: [DEPLOYMENT.md](DEPLOYMENT.md). Asosiy yo‘l — **to‘liq bepul**: Vercel Hobby + Neon Free + Gemini bepul tarifi. Karta va domen kerak emas.
 
 1. BotFather’da tokenni yangilang.
-2. GitHub’da private repo oching — kod shu yerga yuklanadi.
-3. Railway → Deploy from GitHub → Generate Domain → Volume `/data`.
-4. Railway Variables: `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`, `MODEL_ID`.
-5. Botga `/start` → ko‘rsatilgan ID’ni `TELEGRAM_OWNER_USER_ID` ga yozing.
+2. [Google AI Studio](https://aistudio.google.com) → **Create API key**.
+3. Vercel → loyiha → **Storage → Neon (Free)** → ulang.
+4. Vercel → **Environment Variables**: `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY` (Sensitive). `MODEL_ID=gemini-3.8-flash` oldindan qo‘yilgan.
+5. Botga `/start` → ko‘rsatilgan ID’ni `TELEGRAM_OWNER_USER_ID` ga yozing → Redeploy.
 
-Webhook, secret, baza va vaqt zonasi o‘zi sozlanadi.
+Webhook, secret, jadval va vaqt zonasi o‘zi sozlanadi. Bepul tarifda hisobot belgilangan soat ichida keladi (masalan 21:00–21:59).
 
 Lokal ishga tushirish (Node.js 24):
 
@@ -54,8 +54,9 @@ npm run check-env && npm run build && npm start
 
 ```bash
 npm test                                   # unit sinovlar (tarmoqsiz)
-npm run build:test && npm run test:e2e     # build qilingan server + mock Telegram/Claude
-npm run test:e2e:schedule                  # jadval o‘zi hisobot yuborishini tekshiradi (~10 daqiqa)
+npm run build:test && npm run test:e2e     # build qilingan server + mock Telegram/Gemini
+E2E_PROVIDER=anthropic npm run test:e2e    # xuddi shu, mock Claude bilan
+npm run test:e2e:schedule                  # jadval o‘zi hisobot yuborishini tekshiradi (~3 daqiqa)
 ```
 
 ## Fayllar
@@ -71,7 +72,8 @@ npm run test:e2e:schedule                  # jadval o‘zi hisobot yuborishini t
 | `context/sources.md` | Qaysi material o‘qildi, qaysi biri yo‘q |
 | `agent/lib/migrations.ts` | Baza sxemasi |
 | `agent/lib/reports.ts` | Hisobot shablonlari |
-| `agent/schedules/reports.ts` | Jadval |
+| `agent/schedules/tick/` | Jadval: 24 ta kunlik uyg‘onish (har soatga bittadan) → `agent/lib/tick.ts` |
+| `agent/lib/model-config.ts` | Model provayderi (Gemini / Claude / AI Gateway) |
 | `agent/lib/adapters/` | STT, TTS, kalendar, Instagram, qo‘ng‘iroq adapterlari |
 | `INTEGRATIONS.md` | Har integratsiya va uni yoqish yo‘li |
 | `CLAUDE.md` | Keyingi qurilish uchun qoidalar |

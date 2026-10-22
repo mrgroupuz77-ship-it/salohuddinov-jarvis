@@ -1,6 +1,7 @@
 // End-to-end check of the BUILT eve server: real webhook route, real channel,
-// real agent loop, real tools and database — with Telegram and Anthropic
-// replaced by local mocks. Run: npm run build:test && npm run test:e2e
+// real agent loop, real tools and database — with Telegram and the model
+// provider replaced by local mocks. Run: npm run build:test && npm run test:e2e
+// E2E_PROVIDER=google (default, the free Gemini path) or anthropic.
 
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
@@ -11,7 +12,8 @@ import { join, resolve } from "node:path";
 import { readdirSync } from "node:fs";
 
 import { webhookSecret } from "../../agent/lib/webhook.ts";
-import { startAnthropicMock, startTelegramMock } from "./mocks.ts";
+import { GEMINI_SIGNATURE, startAnthropicMock, startGeminiMock, startTelegramMock } from "./mocks.ts";
+import type { Script } from "./mocks.ts";
 
 // E2E_ROOT lets this run against a clean "container-like" copy of the project.
 const ROOT = process.env.E2E_ROOT ? resolve(process.env.E2E_ROOT) : resolve(import.meta.dirname, "../..");
@@ -21,8 +23,10 @@ const FAKE_TOKEN = "123456789:TEST_ONLY_fake_token_aaaaaaaaaaaaaaaaaaaa";
 // No TELEGRAM_WEBHOOK_SECRET_TOKEN is configured: the server derives it from the token.
 const SECRET = webhookSecret({ TELEGRAM_BOT_TOKEN: FAKE_TOKEN })!;
 const PUBLIC_DOMAIN = "jarvis-e2e.up.railway.app";
-const RUNTIME_MODEL = "claude-runtime-model";
-const FAKE_MODEL_KEY = "e2e-anthropic-key-not-real-123";
+const PROVIDER = process.env.E2E_PROVIDER === "anthropic" ? "anthropic" : "google";
+const RUNTIME_MODEL = PROVIDER === "google" ? "gemini-runtime-model" : "claude-runtime-model";
+const FAKE_MODEL_KEY = PROVIDER === "google" ? "e2e-gemini-key-not-real-123" : "e2e-anthropic-key-not-real-123";
+console.log(`provider: ${PROVIDER}`);
 
 const results: Array<{ name: string; ok: boolean; detail?: string }> = [];
 const check = (name: string, ok: boolean, detail?: string) => {
@@ -42,14 +46,13 @@ async function waitFor<T>(fn: () => T | undefined | false, timeoutMs = 25_000): 
 }
 
 const tg = await startTelegramMock();
-const ai = await startAnthropicMock((req) => {
-  const messages = (req.messages ?? []) as Array<{ role: string; content: unknown }>;
-  const last = messages[messages.length - 1];
-  const lastJson = JSON.stringify(last?.content ?? "");
-  if (lastJson.includes("tool_result") && lastJson.includes("tasdiq_kutilmoqda")) {
+// One conversation script for both providers; `lastJson` is the latest message.
+const scriptStep = (lastJson: string): ReturnType<Script> => {
+  const isToolResult = lastJson.includes("tool_result") || lastJson.includes("functionResponse");
+  if (isToolResult && lastJson.includes("tasdiq_kutilmoqda")) {
     return { kind: "text", text: "Post tasdiq uchun yuborildi. Hali hech narsa e’lon qilinmadi." };
   }
-  if (lastJson.includes("tool_result")) {
+  if (isToolResult) {
     return { kind: "text", text: "Bajarildi: vazifa saqlandi.\nNatija: ertaga 15:00 — Aziza bilan uchrashuv.\nKeyingi qadam: tayyorgarlik savollarini yozib beraymi?" };
   }
   if (lastJson.toLowerCase().includes("kanalga post")) {
@@ -59,7 +62,17 @@ const ai = await startAnthropicMock((req) => {
     return { kind: "tool", name: "task_create", input: { title: "Aziza bilan uchrashuv", due_at: "2026-10-13T15:00:00+05:00", priority: "yuqori" } };
   }
   return { kind: "text", text: "Labbay, bro." };
-});
+};
+
+const ai =
+  PROVIDER === "google"
+    ? await startGeminiMock(scriptStep)
+    : await startAnthropicMock((req) => {
+        const messages = (req.messages ?? []) as Array<{ role: string; content: unknown }>;
+        return scriptStep(JSON.stringify(messages[messages.length - 1]?.content ?? ""));
+      });
+const toolNamesOf = (req: Record<string, unknown>): string[] =>
+  PROVIDER === "google" ? ((req.toolNames ?? []) as string[]) : ((req.tools ?? []) as Array<{ name?: string }>).map((t) => String(t.name));
 
 const dataDir = mkdtempSync(join(tmpdir(), "jarvis-e2e-"));
 const port = 3900 + Math.floor(Math.random() * 90);
@@ -67,9 +80,10 @@ const base = `http://127.0.0.1:${port}`;
 const env: NodeJS.ProcessEnv = {
   ...process.env,
   MODEL_ID: RUNTIME_MODEL, // the build used a different placeholder id
-  ANTHROPIC_API_KEY: FAKE_MODEL_KEY,
+  ...(PROVIDER === "google"
+    ? { GEMINI_API_KEY: FAKE_MODEL_KEY, GOOGLE_GENERATIVE_AI_BASE_URL: `http://127.0.0.1:${ai.port}/v1beta` }
+    : { ANTHROPIC_API_KEY: FAKE_MODEL_KEY, ANTHROPIC_BASE_URL: `http://127.0.0.1:${ai.port}/v1` }),
   RAILWAY_PUBLIC_DOMAIN: PUBLIC_DOMAIN,
-  ANTHROPIC_BASE_URL: `http://127.0.0.1:${ai.port}/v1`,
   TELEGRAM_BOT_TOKEN: FAKE_TOKEN,
   TELEGRAM_OWNER_USER_ID: String(OWNER),
   TELEGRAM_API_BASE_URL: `http://127.0.0.1:${tg.port}`,
@@ -144,6 +158,16 @@ try {
     JSON.stringify(setHook?.body ?? null).replace(SECRET, "<secret>"),
   );
 
+  const setupRes = await fetch(`${base}/jarvis/webhook`);
+  const setupText = await setupRes.text();
+  let setupJson: { state?: string; url?: string } = {};
+  try { setupJson = JSON.parse(setupText); } catch { /* not json */ }
+  check(
+    "GET /jarvis/webhook holatni qaytaradi, secret/token chiqarmaydi",
+    setupRes.status === 200 && ["already_ok", "set"].includes(String(setupJson.state)) && setupJson.url === `https://${PUBLIC_DOMAIN}/eve/v1/telegram` && !setupText.includes(SECRET) && !setupText.includes(FAKE_TOKEN),
+    `${setupRes.status} ${setupText.slice(0, 300)}`,
+  );
+
   const noSecret = await post(msgUpdate(OWNER, "salom"), null);
   check("secret token’siz webhook rad etiladi", noSecret.status === 401 || noSecret.status === 403, `status ${noSecret.status}`);
   const wrongSecret = await post(msgUpdate(OWNER, "salom"), "wrong");
@@ -172,9 +196,14 @@ try {
   const reqJson = JSON.stringify(firstReq);
   check("modelga Jarvis ko‘rsatmalari va kontekst fayllari boradi", reqJson.includes("Salohuddinov Jarvis") && reqJson.includes("Media Tizimlar Arxitektori"));
   check("modelga joriy vaqt konteksti boradi", reqJson.includes("jarvis_context") && reqJson.includes("Asia/Tashkent"));
-  const toolNames = ((firstReq.tools ?? []) as Array<{ name?: string }>).map((t) => t.name);
+  const toolNames = toolNamesOf(firstReq);
   check("model faqat Jarvis tool’larini ko‘radi (bash/fayl yo‘q)", toolNames.includes("task_create") && toolNames.includes("approval_request") && !toolNames.includes("bash") && !toolNames.includes("write_file"), toolNames.join(","));
   check("kontent qoidalari har xabarga to‘liq yuborilmaydi (skill sifatida)", !reqJson.includes("70/20/10 + original uslub") && reqJson.includes("kontent-yozish"));
+  if (PROVIDER === "google") {
+    check("Gemini: API kalit header’da yuborildi (body’da emas)", firstReq.apiKeyHeader === true);
+    const followUp = ai.requests.find((r) => String(r.lastJson).includes("functionResponse"));
+    check("Gemini: tool javobidan keyingi so‘rovda thought signature saqlangan", Boolean(followUp) && JSON.stringify(followUp!.contents).includes(GEMINI_SIGNATURE), followUp ? "signature yo‘q" : "follow-up yo‘q");
+  }
   const allModelTraffic = JSON.stringify(ai.requests);
   check("model kontekstiga token/secret chiqmaydi", !allModelTraffic.includes(FAKE_TOKEN) && !allModelTraffic.includes(SECRET) && !allModelTraffic.includes(FAKE_MODEL_KEY));
 

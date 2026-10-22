@@ -5,6 +5,7 @@
 import type { AppConfig } from "./config.ts";
 import { sttReady } from "./config.ts";
 import type { Db } from "./db.ts";
+import { MODEL_KEY_NAMES, PROVIDER_LABEL } from "./model-config.ts";
 import { integrationEvents, lastInboundAt, lastReportRuns } from "./store.ts";
 import { formatLocal } from "./time.ts";
 
@@ -62,10 +63,10 @@ export async function collectStatuses(cfg: AppConfig, db: Db | null, now = new D
   const modelEvent = events["model"];
   const model: IntegrationStatus = {
     key: "model",
-    label: "Claude modeli",
+    label: `Model — ${PROVIDER_LABEL[cfg.modelProvider]}${cfg.modelId ? ` (${cfg.modelId})` : ""}`,
     stage: "1–2",
     ...(!cfg.modelIdPresent || !cfg.modelKeyPresent
-      ? { state: "ulanmagan" as const, detail: "MODEL_ID yoki ANTHROPIC_API_KEY yo‘q" }
+      ? { state: "ulanmagan" as const, detail: `MODEL_ID yoki ${MODEL_KEY_NAMES[cfg.modelProvider][0]} yo‘q` }
       : modelEvent?.state === "xato"
         ? { state: "xato" as const, detail: `oxirgi xato: ${formatLocal(new Date(modelEvent.checked_at), tz)} — ${modelEvent.detail ?? ""}` }
         : modelEvent?.state === "ulangan"
@@ -83,6 +84,8 @@ export async function collectStatuses(cfg: AppConfig, db: Db | null, now = new D
   };
 
   const lastRun = runs[0];
+  const tick = events["scheduler"];
+  const tickNote = tick ? `oxirgi uyg‘onish: ${formatLocal(new Date(tick.checked_at), tz)}` : "hali uyg‘onmagan";
   const scheduler: IntegrationStatus = {
     key: "scheduler",
     label: "Jadval (hisobotlar)",
@@ -90,9 +93,11 @@ export async function collectStatuses(cfg: AppConfig, db: Db | null, now = new D
     ...(lastRun
       ? {
           state: (lastRun.status === "xato" || lastRun.status === "noaniq" ? "xato" : "ulangan") as IntegrationState,
-          detail: `oxirgi: ${lastRun.dedupe_key} — ${lastRun.status} (${formatLocal(new Date(lastRun.updated_at), tz)})`,
+          detail: `oxirgi hisobot: ${lastRun.dedupe_key} — ${lastRun.status} (${formatLocal(new Date(lastRun.updated_at), tz)}); ${tickNote}`,
         }
-      : { state: "sozlangan_sinalmagan" as const, detail: "`eve start` ishlayotgan serverda har 5 daqiqada tekshiradi; hali hisobot yuborilmagan" }),
+      : tick
+        ? { state: "ulangan" as const, detail: `${tickNote}; hali hisobot yuborilmagan` }
+        : { state: "sozlangan_sinalmagan" as const, detail: "soatiga bir marta uyg‘onadi (Vercel bepul tarifida — soat ichidagi istalgan daqiqada); hali uyg‘onmagan" }),
   };
 
   const stt: IntegrationStatus = {

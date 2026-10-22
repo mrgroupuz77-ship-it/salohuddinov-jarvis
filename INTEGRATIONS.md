@@ -6,21 +6,26 @@ Har integratsiyaning holati: **ulangan / sozlangan, sinalmagan / ulanmagan / xat
 
 - Kanal: eve’ning rasmiy Telegram kanali (`agent/channels/telegram.ts`), route `POST /eve/v1/telegram`.
 - Har so‘rov `X-Telegram-Bot-Api-Secret-Token` bo‘yicha tekshiriladi. Secret `TELEGRAM_WEBHOOK_SECRET_TOKEN` dan yoki (bo‘sh bo‘lsa) bot tokenidan HMAC bilan hosil qilinadi — token revoke qilinsa secret ham avtomatik almashadi.
-- Webhook’ni server o‘zi o‘rnatadi (`agent/lib/webhook.ts`): `PUBLIC_URL` yoki Railway’ning `RAILWAY_PUBLIC_DOMAIN` manzili. Jarayon boshida bir marta `setWebhook` (kutilayotgan xabarlar o‘chirilmaydi), keyin har 30 daqiqada `getWebhookInfo` bilan tekshiriladi; Telegram qaytargan oxirgi xato `/status` da ko‘rinadi.
+- Webhook’ni server o‘zi o‘rnatadi (`agent/lib/webhook.ts`): `PUBLIC_URL`, Railway’ning `RAILWAY_PUBLIC_DOMAIN` yoki Vercel production domeni (`VERCEL_PROJECT_PRODUCTION_URL`, faqat `VERCEL_ENV=production`). Deploy’dan keyin darhol tekshirish: `GET /jarvis/webhook` (secret qaytarmaydi). Jarayon boshida bir marta `setWebhook` (kutilayotgan xabarlar o‘chirilmaydi), keyin har 30 daqiqada `getWebhookInfo` bilan tekshiriladi; Telegram qaytargan oxirgi xato `/status` da ko‘rinadi.
 - Faqat `TELEGRAM_OWNER_USER_ID` boshqaradi. Birinchi yozgan odam ega bo‘lmaydi. Guruhlar o‘chirilgan.
 - Takroriy update: `chat_id + message_id` (callback uchun `callback_query.id`) bazada bir martalik kalit. eve Telegram kanali update’ni bizning hookka `update_id`siz beradi; xabar uchun bu kalit `update_id` bilan teng kuchli, chunki Telegram qayta yuborganda xabar o‘sha `message_id` bilan keladi.
-- Buyruqlar va menyu (`Bugun / Loyihalar / Mijozlar / Kontent / Tahlil / Hisobot / Tasdiqlar / Sozlamalar`) modelsiz, bazadan javob beradi. Erkin o‘zbekcha matn Claude’ga boradi.
+- Buyruqlar va menyu (`Bugun / Loyihalar / Mijozlar / Kontent / Tahlil / Hisobot / Tasdiqlar / Sozlamalar`) modelsiz, bazadan javob beradi. Erkin o‘zbekcha matn modelga boradi.
 - Tasdiq tugmalari (`Tasdiqlash / Tahrirlash / Bekor qilish`) — o‘zimizning callback’lar: `jv:a:<id>:<versiya-hash>:<qaror>`. Server faqat joriy versiya hash’i mos kelsa bajaradi.
 
 Telegram qo‘ng‘irog‘i haqida: `phone.requestCall` faqat foydalanuvchi hisoblari uchun (MTProto). Bot API tokeni bilan bot Telegram ichida qo‘ng‘iroq qila olmaydi. Buni bot’ga qo‘shib bo‘lmaydi. Kerak bo‘lsa alohida foydalanuvchi hisobi integratsiyasi va uning xavfi (akkaunt bloklanishi, Telegram qoidalari) alohida ko‘rib chiqiladi.
 
-## 2. Claude modeli — kalit kutilmoqda
+## 2. Model — Gemini (bepul) yoki Claude, kalit kutilmoqda
 
-- `agent/agent.ts`: `anthropic(MODEL_ID)`. Model ID faqat sozlamada.
-- Kalit: `ANTHROPIC_API_KEY`. Muqobil: Vercel AI Gateway (eve hujjati: `node_modules/eve/docs/agent-config.md`).
+- `agent/agent.ts` + `agent/lib/model-config.ts`. Provayder `MODEL_ID` dan aniqlanadi; model ID kodda qotirilmagan.
+  - `gemini-…` → Google AI Studio, kalit `GEMINI_API_KEY` (yoki `GOOGLE_GENERATIVE_AI_API_KEY`). Bepul tarif bor; unda Google ma’lumotlarni mahsulotlarini yaxshilash uchun ishlatadi ([pricing](https://ai.google.dev/gemini-api/docs/pricing)).
+  - `claude-…` → `ANTHROPIC_API_KEY` (pullik).
+  - `vendor/model` → Vercel AI Gateway.
+- Bepul limit tugasa (429 / RESOURCE_EXHAUSTED) Jarvis buni ochiq aytadi; buyruqlar modelsiz ishlayveradi.
+- Gemini 3 tool chaqiruvlaridagi thought signature keyingi so‘rovga qaytariladi (E2E tekshirgan).
 - `defaultTools: false` — model shell, fayl tizimi va subagent’larni ko‘rmaydi; faqat Jarvis tool’lari.
 - Xarajat chegarasi: `SESSION_MAX_INPUT_TOKENS`, `SESSION_MAX_OUTPUT_TOKENS`.
 - Kontent qoidalari `kontent-yozish` skill’ida: faqat kerak bo‘lganda yuklanadi.
+- **O‘zbekcha kontent sifati Gemini bilan hali sinalmagan** (qabul sinovi #10).
 
 Ixtiyoriy: veb-qidiruv (raqobatchilar tahlili uchun) — `eve add tool/web_search`. Anthropic’da narxi 1000 qidiruvga $10 + tokenlar ([manba](https://platform.claude.com/docs/en/about-claude/pricing)). Tashkilot sozlamasida web search yoqilgan bo‘lishi kerak. Hozir qo‘shilmagan.
 
@@ -33,7 +38,7 @@ Ixtiyoriy: veb-qidiruv (raqobatchilar tahlili uchun) — `eve add tool/web_searc
 
 ## 4. Jadval va hisobotlar — tayyor
 
-- `agent/schedules/reports.ts` har 5 daqiqada uyg‘onadi. Qaysi hisobot vaqti kelgani bazadagi sozlamadan hisoblanadi (Asia/Tashkent).
+- `agent/schedules/tick/h00…h23.ts` — 24 ta kunlik cron, har soatga bittadan (Vercel Hobby faqat kunlik cron’ga ruxsat beradi; Vercel uni soat ichidagi istalgan daqiqada ishga tushiradi). Qaysi hisobot vaqti kelgani bazadagi sozlamadan hisoblanadi (Asia/Tashkent). Har uyg‘onish `/status` da ko‘rinadi.
 - Boshlang‘ich: 09:00 ertalabki reja; 21:00 kunlik; yakshanba 19:00 haftalik; oyning 1-kuni 10:00 oldingi oy.
 - Bir davr uchun bitta xabar: `report_runs` asosiy kaliti (`owner:daily:2026-10-12`). Bir vaqtda kelganlar bitta xabarga birlashadi.
 - Yuborish holati noaniq bo‘lsa (tarmoq uzildi) — qayta yuborilmaydi, `noaniq` deb belgilanadi. Aniq xato bo‘lsa — 10 daqiqa oraliq bilan 3 martagacha.
@@ -70,7 +75,7 @@ Hozir: skrinshot yoki CSV yuborilsa, Jarvis shu asosda tahlil qiladi va buni “
 ## 9. Telefon qo‘ng‘irog‘i — o‘chirilgan (5-bosqich)
 
 - `agent/lib/adapters/calls.ts`: `checkCall` qoidalari tayyor — `CALLS_ENABLED`, faqat `CALLS_ALLOWED_NUMBER`, tinch vaqtda faqat aniq belgilangan uyg‘otish. `placeCall` hozir doim xato beradi — tizim hech qachon “qo‘ng‘iroq qildim” demaydi.
-- Reja: Twilio (yoki boshqa provayder) — chiquvchi qo‘ng‘iroq + ikki tomonlama Media Streams → STT → Claude → TTS. Gapni bo‘lish, jimlik, uzilish va qayta ulanish alohida ishlanadi. Javob bo‘lmasa — ketma-ket qo‘ng‘iroq emas, Telegramga qisqa xabar.
+- Reja: Twilio (yoki boshqa provayder) — chiquvchi qo‘ng‘iroq + ikki tomonlama Media Streams → STT → model → TTS. Gapni bo‘lish, jimlik, uzilish va qayta ulanish alohida ishlanadi. Javob bo‘lmasa — ketma-ket qo‘ng‘iroq emas, Telegramga qisqa xabar.
 - eve’da `twilio` kanali bor (SMS va kiruvchi qo‘ng‘iroqni `<Gather>` orqali matnga o‘giradi) — bu oqimli suhbat emas, navbatma-navbat.
 - Narx: O‘zbekistonga chiquvchi qo‘ng‘iroq mobil $0,1972/daqiqa ([Twilio](https://www.twilio.com/voice/pricing/uz)). O‘zbekiston raqamini olish mumkinligi va +998 ga yetkazish sifati **tekshirilmagan**.
 

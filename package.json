@@ -12,15 +12,16 @@
     "start": "node --env-file-if-exists=.env node_modules/eve/bin/eve.js start",
     "typecheck": "tsc",
     "test": "node --test --test-reporter=spec \"tests/unit/*.test.ts\"",
-    "build:test": "MODEL_ID=claude-test-model eve build",
+    "build:test": "MODEL_ID=gemini-test-model eve build",
     "test:e2e": "node tests/e2e/run-e2e.ts",
-    "test:e2e:schedule": "node tests/e2e/run-e2e-schedule.ts",
+    "test:e2e:schedule": "JARVIS_TICK_CRON='* * * * *' MODEL_ID=gemini-test-model eve build && JARVIS_TICK_CRON='* * * * *' node tests/e2e/run-e2e-schedule.ts",
     "check-env": "node --env-file-if-exists=.env scripts/check-env.ts",
     "db:migrate": "node --env-file-if-exists=.env scripts/migrate.ts",
     "webhook:set": "node --env-file-if-exists=.env scripts/set-webhook.ts",
     "deploy": "eve deploy"
   },
   "dependencies": {
+    "@ai-sdk/google": "4.0.95",
     "@electric-sql/pglite": "^0.5.9",
     "@vercel/connect": "2.2.0",
     "ai": "^7.0.137",
@@ -37,5 +38,5 @@
   "engines": {
     "node": "24.x"
   },
-  "description": "Salohuddinov Jarvis — Telegram orqali ishlaydigan shaxsiy ish yordamchisi (eve + Claude)"
+  "description": "Salohuddinov Jarvis — Telegram orqali ishlaydigan shaxsiy ish yordamchisi (eve; Gemini bepul tarif yoki Claude)"
 }

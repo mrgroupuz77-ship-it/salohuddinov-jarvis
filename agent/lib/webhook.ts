@@ -1,7 +1,9 @@
 // Self-registering Telegram webhook. The server tells Telegram where to send
 // updates, so nobody has to run a command with the token by hand.
 //
-// - Public URL: PUBLIC_URL, or Railway's automatic RAILWAY_PUBLIC_DOMAIN.
+// - Public URL: PUBLIC_URL, Railway's automatic RAILWAY_PUBLIC_DOMAIN, or the
+//   Vercel production domain (VERCEL_PROJECT_PRODUCTION_URL, production only —
+//   a preview deployment must never take the bot over).
 // - Secret header: TELEGRAM_WEBHOOK_SECRET_TOKEN, or (if unset) derived from the
 //   bot token with HMAC — secret as long as the token is, and it changes
 //   automatically when the token is revoked.
@@ -44,6 +46,11 @@ export function publicBaseUrl(env: Env = process.env): string | undefined {
   if (explicit) return explicit.replace(/\/+$/, "");
   const railway = env.RAILWAY_PUBLIC_DOMAIN?.trim();
   if (railway) return `https://${railway.replace(/\/+$/, "")}`;
+  if (env.VERCEL?.trim() === "1") {
+    if (env.VERCEL_ENV?.trim() !== "production") return undefined;
+    const vercel = env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+    if (vercel) return `https://${vercel.replace(/^https?:\/\//, "").replace(/\/+$/, "")}`;
+  }
   return undefined;
 }
 
@@ -80,7 +87,10 @@ export async function ensureWebhook(opts: { env?: Env; fetch?: FetchLike; now?: 
   const url = desiredWebhookUrl(env);
   const secret = webhookSecret(env);
   if (!readSecret("TELEGRAM_BOT_TOKEN", env)) return { state: "skipped", detail: "TELEGRAM_BOT_TOKEN yo‘q" };
-  if (!url) return { state: "skipped", detail: "PUBLIC_URL yoki RAILWAY_PUBLIC_DOMAIN yo‘q" };
+  if (!url) {
+    const preview = env.VERCEL?.trim() === "1" && env.VERCEL_ENV?.trim() !== "production";
+    return { state: "skipped", detail: preview ? "preview deploy — webhook faqat production’da o‘rnatiladi" : "ommaviy manzil yo‘q (PUBLIC_URL, Railway yoki Vercel domeni)" };
+  }
   if (!url.startsWith("https://")) return { state: "skipped", detail: "Webhook faqat https:// manzil bilan ishlaydi" };
   if (registeredThisProcess && now - lastCheckAt < (opts.recheckMs ?? 30 * 60_000)) {
     return { state: "already_ok", url, detail: "yaqinda tekshirilgan" };

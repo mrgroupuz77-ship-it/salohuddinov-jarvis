@@ -11,6 +11,7 @@ const PATTERNS: Array<[RegExp, string]> = [
   [/bot\d{5,12}:[A-Za-z0-9_-]{20,}/g, "bot[TELEGRAM_TOKEN]"],
   [/\b\d{5,12}:[A-Za-z0-9_-]{30,}\b/g, "[TELEGRAM_TOKEN]"],
   [/sk-ant-[A-Za-z0-9_-]{10,}/g, "[ANTHROPIC_KEY]"],
+  [/\bAIza[0-9A-Za-z_-]{30,}/g, "[GOOGLE_KEY]"],
   [/\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}/g, "[API_KEY]"],
   [/\bAC[a-f0-9]{32}\b/g, "[TWILIO_SID]"],
   [/(postgres(?:ql)?:\/\/[^:/\s@]+:)[^@\s]+@/gi, "$1***@"],

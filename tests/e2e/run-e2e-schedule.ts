@@ -1,7 +1,9 @@
 // Proves the proactive path on the BUILT server: eve's Nitro scheduler fires
-// agent/schedules/reports.ts, which sends one real daily report to the owner
-// and never a second one for the same period. Takes up to ~6 minutes
-// because the schedule wakes every 5 minutes.
+// the wake-up schedule (agent/schedules/tick/h00.ts → agent/lib/tick.ts), which
+// sends one real daily report to the owner and never a second one for the
+// same period. In production the 24 tick files wake once an hour; this test
+// builds with JARVIS_TICK_CRON="* * * * *" so h00 fires every minute
+// (npm run test:e2e:schedule does the build). Takes ~2–3 minutes.
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -36,8 +38,8 @@ const server = spawn("npx", ["eve", "start", "--host", "127.0.0.1", "--port", St
   stdio: ["ignore", "pipe", "pipe"],
   env: {
     ...process.env,
-    MODEL_ID: "claude-test-model",
-    ANTHROPIC_API_KEY: "not-used",
+    MODEL_ID: "gemini-test-model",
+    GEMINI_API_KEY: "not-used",
     TELEGRAM_BOT_TOKEN: "123456789:TEST_ONLY_fake_token_aaaaaaaaaaaaaaaaaaaa",
     TELEGRAM_WEBHOOK_SECRET_TOKEN: "sched-secret-123",
     TELEGRAM_OWNER_USER_ID: OWNER,

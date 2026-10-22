@@ -6,21 +6,17 @@ import { getDb } from "../lib/db.ts";
 import { handleCallback, handleInboundMessage } from "../lib/inbound.ts";
 import type { InboundMessage, PipelineDeps, TelegramPort } from "../lib/inbound.ts";
 import { log } from "../lib/log.ts";
+import { isQuotaError } from "../lib/model-config.ts";
 import { recordIntegrationEvent } from "../lib/store.ts";
 import { ensureWebhook, webhookSecret } from "../lib/webhook.ts";
-import type { WebhookCheck } from "../lib/webhook.ts";
+import { recordWebhook } from "../lib/webhook-status.ts";
 
 const cfg = loadConfig();
 const deps: PipelineDeps = { cfg, db: getDb };
 
-export async function recordWebhook(check: WebhookCheck): Promise<void> {
-  if (check.state === "skipped" || check.state === "already_ok") return;
-  const detail = `${check.detail}${check.lastError ? `; Telegram oxirgi xatosi: ${check.lastError}` : ""}`;
-  await getDb().then((db) => recordIntegrationEvent(db, "webhook", check.state === "error" ? "xato" : "ulangan", detail)).catch(() => undefined);
-}
 
-// Register the webhook as soon as the server loads this channel; the report
-// schedule re-checks it every few minutes as a safety net.
+// Register the webhook as soon as the server loads this channel; the hourly
+// wake-up (agent/lib/tick.ts) and GET /jarvis/webhook re-check it.
 void ensureWebhook().then(recordWebhook).catch(() => undefined);
 
 const record = (state: "ulangan" | "xato", detail: string) =>
@@ -68,9 +64,14 @@ export default telegramChannel({
       }
     },
     async "turn.failed"(data, channel) {
-      await record("xato", "turn failed");
+      const quota = isQuotaError(`${data.code ?? ""} ${data.message ?? ""}`);
+      await record("xato", quota ? "model limiti tugagan (429 / quota)" : `turn failed: ${data.code ?? "noma’lum"}`);
       if (data.terminal) return;
-      await channel.telegram.post("Xatolik bo‘ldi, so‘rovni oxiriga yetkaza olmadim. Qayta yozib ko‘ring. Takrorlansa — /status.");
+      await channel.telegram.post(
+        quota
+          ? "Modelning bepul limiti hozircha tugadi, javob bera olmadim. Pul yechilmaydi. Bir ozdan keyin (kunlik limit bo‘lsa — ertaga) qayta yozing. Buyruqlar (/today, /report, /status) modelsiz ishlayveradi."
+          : "Xatolik bo‘ldi, so‘rovni oxiriga yetkaza olmadim. Qayta yozib ko‘ring. Takrorlansa — /status.",
+      );
     },
     async "session.failed"(_data, channel) {
       await record("xato", "session failed");
